@@ -25,8 +25,12 @@ from gmail_client import (
     get_or_create_label,
 )
 
-LABEL_PROGRESS = "[Job] Progress"
-LABEL_NOISE    = "[Filtered] Noise"
+LABEL_JOB_APPLIED  = "[Job] Applied"
+LABEL_JOB_FORWARD  = "[Job] Forward"
+LABEL_JOB_REJECTED = "[Job] Rejected"
+LABEL_NEWSLETTER   = "[Newsletter]"
+LABEL_RECEIPT      = "[Receipt]"
+LABEL_JUNK         = "[Junk]"
 
 
 @functions_framework.http
@@ -58,8 +62,12 @@ def classify_email_handler(request):
         service       = get_gmail_service()
         gemini_client = get_gemini_client()
 
-        progress_label_id = get_or_create_label(service, LABEL_PROGRESS)
-        noise_label_id    = get_or_create_label(service, LABEL_NOISE)
+        job_applied_label_id  = get_or_create_label(service, LABEL_JOB_APPLIED)
+        job_forward_label_id  = get_or_create_label(service, LABEL_JOB_FORWARD)
+        job_rejected_label_id = get_or_create_label(service, LABEL_JOB_REJECTED)
+        newsletter_label_id   = get_or_create_label(service, LABEL_NEWSLETTER)
+        receipt_label_id      = get_or_create_label(service, LABEL_RECEIPT)
+        junk_label_id         = get_or_create_label(service, LABEL_JUNK)
 
         # Fetch unread inbox messages.
         messages = fetch_unread_messages(service, max_results=10)
@@ -81,11 +89,21 @@ def classify_email_handler(request):
             category = classify_email(gemini_client, subject, sender, body)
             print(f"[{category}] {subject[:60]}")
 
-            if category == "JOB_PROGRESS":
-                apply_label(service, msg_id, progress_label_id)
-
-            elif category == "NOISE":
-                apply_label(service, msg_id, noise_label_id)
+            if category == "JOB_APPLIED":
+                apply_label(service, msg_id, job_applied_label_id)
+                archive_message(service, msg_id)
+            elif category == "JOB_FORWARD":
+                apply_label(service, msg_id, job_forward_label_id)
+            elif category == "JOB_REJECTED":
+                apply_label(service, msg_id, job_rejected_label_id)
+                archive_message(service, msg_id)
+            elif category == "NEWSLETTER":
+                apply_label(service, msg_id, newsletter_label_id)
+            elif category == "RECEIPT":
+                apply_label(service, msg_id, receipt_label_id)
+                archive_message(service, msg_id)
+            elif category == "JUNK":
+                apply_label(service, msg_id, junk_label_id)
                 archive_message(service, msg_id)
 
             # KEEP: no action — message remains in Inbox as-is.

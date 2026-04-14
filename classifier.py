@@ -15,47 +15,67 @@ GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 CLASSIFICATION_PROMPT = """
 You are an email classifier for a software developer actively applying for jobs.
-Classify the email below into EXACTLY one of three categories.
+Classify the email below into EXACTLY one of seven categories.
 
 ─────────────────────────────────────────────────────────────
-CATEGORY 1 — JOB_PROGRESS
+CATEGORY 1 — JOB_APPLIED
 ─────────────────────────────────────────────────────────────
-Emails that represent real movement in a job application process.
-This includes:
-  - Interview invitations or scheduling requests
-  - Recruiter follow-ups requesting availability or more info
-  - Technical assessments or take-home assignments
-  - Offer letters or compensation discussions
-  - Rejection notices (a definitive final answer)
-  - Referrals or warm introductions to a hiring team
+Auto-confirmations that an application was received.
+- "We received your application"
+- "Thanks for applying to..."
+- "Your application is under review"
+- Generic automated responses from ATS systems
 
 ─────────────────────────────────────────────────────────────
-CATEGORY 2 — NOISE
+CATEGORY 2 — JOB_FORWARD
 ─────────────────────────────────────────────────────────────
-Low-value emails that require no action and contain no new information.
-This includes:
-  - Automated "we received your application" confirmations
-  - Generic "thanks for applying, we'll be in touch" auto-replies
-  - Promotional or marketing emails from brands or retailers
-  - LinkedIn job recommendations, alerts, or digest emails
-  - Glassdoor, Indeed, or job board alert emails
-  - Receipt or order confirmation emails
-  - Social media notifications (Facebook, Instagram, etc.)
-  - App or service promotional announcements
+Real progress in a job application process. ALWAYS keep these.
+- ANY email asking you to take an assessment or complete a next step
+- Interview invitations or scheduling requests
+- Recruiter follow-ups requesting availability or more info
+- Technical assessments or take-home assignments
+- Offer letters, compensation, or negotiation
+- IMPORTANT: Ignore "no-reply" senders or "Unsubscribe" links if the email asks you to take an assessment, schedule an interview, or complete next steps. It is JOB_FORWARD.
 
 ─────────────────────────────────────────────────────────────
-CATEGORY 3 — KEEP
+CATEGORY 3 — JOB_REJECTED
 ─────────────────────────────────────────────────────────────
-Emails that are worth keeping in the inbox even if not urgent.
-Use this category when:
-  - The email is a newsletter or digest the user clearly subscribed to
-    (e.g. developer newsletters, AI/tech digests like TLDR, Morning Brew)
-  - The email is from a known contact or service the user actively uses
-  - The content is genuinely informative or time-sensitive
-  - You are uncertain whether the email is important
+Rejection notices.
+- "We have decided to move forward with other candidates"
+- "While your background is impressive..."
 
-When in doubt, use KEEP — it is safer to keep an email than to
-archive something the user might need.
+─────────────────────────────────────────────────────────────
+CATEGORY 4 — NEWSLETTER
+─────────────────────────────────────────────────────────────
+Newsletters, digests, or subscriptions the user wants to read.
+- Developer newsletters
+- AI/tech digests like TLDR, Morning Brew
+- Substack publications or industry news
+
+─────────────────────────────────────────────────────────────
+CATEGORY 5 — RECEIPT
+─────────────────────────────────────────────────────────────
+Purchase confirmations or subscription billing.
+- "Your receipt from..."
+- "Your order has shipped"
+- App store receipts
+
+─────────────────────────────────────────────────────────────
+CATEGORY 6 — JUNK
+─────────────────────────────────────────────────────────────
+Unsolicited marketing, social notifications, or job board spam.
+- Promotional or marketing emails from brands/retailers
+- LinkedIn job recommendations, alerts, or digest emails
+- Glassdoor, Indeed, or specific company job alert emails
+- Social media notifications (Facebook, Instagram, etc.)
+
+─────────────────────────────────────────────────────────────
+CATEGORY 7 — KEEP
+─────────────────────────────────────────────────────────────
+Anything ambiguous, important personal emails, or if uncertain.
+- Emails from known contacts or colleagues
+- Informative or time-sensitive content not fitting above
+- When in doubt, use KEEP — never archive if unsure
 
 ─────────────────────────────────────────────────────────────
 Email Details:
@@ -64,7 +84,7 @@ Subject: {subject}
 Body (first 1000 chars): {body}
 ─────────────────────────────────────────────────────────────
 
-Respond with ONLY the category word: JOB_PROGRESS, NOISE, or KEEP
+Respond with ONLY the category word: JOB_APPLIED, JOB_FORWARD, JOB_REJECTED, NEWSLETTER, RECEIPT, JUNK, or KEEP
 """.strip()
 
 
@@ -88,7 +108,8 @@ def classify_email(client: genai.Client, subject: str, sender: str, body: str) -
     try:
         response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
         result = response.text.strip().upper()
-        return result if result in ("JOB_PROGRESS", "NOISE", "KEEP") else "KEEP"
+        valid_categories = ("JOB_APPLIED", "JOB_FORWARD", "JOB_REJECTED", "NEWSLETTER", "RECEIPT", "JUNK", "KEEP")
+        return result if result in valid_categories else "KEEP"
     except Exception as e:
         print(f"[!] Gemini classification error: {e}")
         return "KEEP"  # Fail safe: never archive on API error.
