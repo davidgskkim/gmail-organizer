@@ -17,9 +17,13 @@ New email arrives in Gmail
 
 | Label | Meaning | Action |
 |---|---|---|
-| `[Job] Progress` | Interview invites, recruiter replies, assessments, offers | Kept in Inbox |
-| `[Filtered] Noise` | Promotional email, job board alerts, auto-confirmations | Archived |
-| *(none)* | Intentional subscriptions, ambiguous mail | Kept in Inbox |
+| `[Job] Applied` | Auto-confirmations ("We received your application") | Archived |
+| `[Job] Forward` | Real progress (interview invites, assessments, offers) | Kept in Inbox |
+| `[Job] Rejected` | Rejection notices | Archived |
+| `[Newsletter]` | Developer newsletters, AI/tech digests (e.g. TLDR) | Kept in Inbox |
+| `[Receipt]` | Purchase confirmations, app store receipts | Archived |
+| `[Junk]` | Promotional email, job board alerts, social notifications | Archived |
+| *(none)* | Ambiguous mail, known contacts | Kept in Inbox |
 
 When in doubt, the classifier keeps email in your Inbox. It only archives mail it is confident is low-value.
 
