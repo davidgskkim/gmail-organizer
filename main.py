@@ -4,8 +4,9 @@ main.py
 Cloud Function entry point. Receives Gmail push notifications via
 Google Cloud Pub/Sub and orchestrates email classification.
 
-Each invocation processes up to 10 unread inbox messages, applies
-Gmail labels, and archives low-value email automatically.
+Uses the Gmail History API and a Firestore-backed historyId cursor to
+ensure each email is classified exactly once, regardless of how many
+Pub/Sub notifications arrive concurrently.
 """
 
 import base64
@@ -13,12 +14,14 @@ import json
 import time
 
 import functions_framework
+from google.cloud import firestore
 
 from classifier import classify_email, get_gemini_client
 from gmail_client import (
     apply_label,
     archive_message,
     fetch_full_message,
+    fetch_messages_from_history,
     fetch_unread_messages,
     get_email_body,
     get_gmail_service,
@@ -32,6 +35,32 @@ LABEL_NEWSLETTER   = "[Newsletter]"
 LABEL_RECEIPT      = "[Receipt]"
 LABEL_JUNK         = "[Junk]"
 
+# ── Firestore State ────────────────────────────────────────────────────────────
+# Stores the last processed Gmail historyId so each invocation only
+# processes emails that arrived since the previous run.
+
+_db = None
+
+def _get_db():
+    """Returns a lazily-initialised Firestore client."""
+    global _db
+    if _db is None:
+        _db = firestore.Client()
+    return _db
+
+def _get_last_history_id() -> str | None:
+    """Reads the last stored historyId from Firestore. Returns None on first run."""
+    doc = _get_db().collection("state").document("gmail_watch").get()
+    return doc.to_dict().get("last_history_id") if doc.exists else None
+
+def _set_last_history_id(history_id: str) -> None:
+    """Persists the current historyId to Firestore for the next invocation."""
+    _get_db().collection("state").document("gmail_watch").set(
+        {"last_history_id": str(history_id)}
+    )
+
+
+# ── Cloud Function Entry Point ─────────────────────────────────────────────────
 
 @functions_framework.http
 def classify_email_handler(request):
@@ -44,8 +73,6 @@ def classify_email_handler(request):
     """
     try:
         # Decode the Pub/Sub envelope.
-        # Gmail sends a base64-encoded JSON payload with the recipient
-        # address and a historyId — a cursor, not the email itself.
         envelope = request.get_json(silent=True)
         if not envelope or "message" not in envelope:
             print("[!] Invalid Pub/Sub message received.")
@@ -55,11 +82,37 @@ def classify_email_handler(request):
         if "data" not in pubsub_message:
             return "OK", 200  # Empty notification — nothing to process.
 
-        data = json.loads(base64.b64decode(pubsub_message["data"]).decode("utf-8"))
-        print(f"[*] Notification for {data.get('emailAddress')} | historyId: {data.get('historyId')}")
+        data           = json.loads(base64.b64decode(pubsub_message["data"]).decode("utf-8"))
+        new_history_id = str(data.get("historyId", ""))
+        print(f"[*] Notification for {data.get('emailAddress')} | historyId: {new_history_id}")
 
-        # Initialise clients.
-        service       = get_gmail_service()
+        # ── Bootstrap: first-ever invocation ──────────────────────────────────
+        # On the very first run there is no stored cursor. Store the current
+        # historyId and exit — the next notification will use it as a start
+        # point and only fetch genuinely new messages.
+        last_history_id = _get_last_history_id()
+        if not last_history_id:
+            print("[*] First run — storing historyId and exiting (nothing to classify yet).")
+            _set_last_history_id(new_history_id)
+            return "OK", 200
+
+        # ── Fetch only new messages via History API ────────────────────────────
+        service = get_gmail_service()
+        messages = fetch_messages_from_history(service, last_history_id)
+
+        if messages is None:
+            # History ID too old (>30 days) — fall back to a small unread scan.
+            print("[!] Falling back to unread scan (historyId expired).")
+            messages = fetch_unread_messages(service, max_results=5)
+
+        # Advance the cursor regardless of whether there were new messages.
+        _set_last_history_id(new_history_id)
+
+        if not messages:
+            print("[*] No new messages to process.")
+            return "OK", 200
+
+        # ── Classify new messages ──────────────────────────────────────────────
         gemini_client = get_gemini_client()
 
         job_applied_label_id  = get_or_create_label(service, LABEL_JOB_APPLIED)
@@ -69,13 +122,7 @@ def classify_email_handler(request):
         receipt_label_id      = get_or_create_label(service, LABEL_RECEIPT)
         junk_label_id         = get_or_create_label(service, LABEL_JUNK)
 
-        # Fetch unread inbox messages.
-        messages = fetch_unread_messages(service, max_results=10)
-        if not messages:
-            print("[*] No unread messages to process.")
-            return "OK", 200
-
-        print(f"[*] Processing {len(messages)} message(s)...")
+        print(f"[*] Processing {len(messages)} new message(s)...")
 
         for msg_ref in messages:
             msg_id  = msg_ref["id"]
@@ -108,7 +155,7 @@ def classify_email_handler(request):
 
             # KEEP: no action — message remains in Inbox as-is.
 
-            time.sleep(4)  # Respect Gemini API rate limits.
+            time.sleep(2)  # Respect Gemini API rate limits.
 
         return "OK", 200
 

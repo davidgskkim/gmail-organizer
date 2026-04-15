@@ -64,6 +64,43 @@ def fetch_full_message(service, msg_id: str) -> dict:
     ).execute()
 
 
+def fetch_messages_from_history(service, start_history_id: str) -> list | None:
+    """
+    Returns message refs newly added to the Inbox since start_history_id.
+
+    Uses the Gmail History API to fetch only the delta — messages that
+    arrived after the last recorded historyId. This prevents re-processing
+    emails that have already been classified.
+
+    Returns None if the historyId is too old (> ~30 days), signalling the
+    caller to fall back to a standard unread scan.
+    """
+    try:
+        result = service.users().history().list(
+            userId="me",
+            startHistoryId=start_history_id,
+            historyTypes=["messageAdded"],
+            labelId="INBOX",
+        ).execute()
+
+        seen_ids = set()
+        messages = []
+        for record in result.get("history", []):
+            for msg_added in record.get("messagesAdded", []):
+                msg    = msg_added.get("message", {})
+                msg_id = msg.get("id")
+                if msg_id and msg_id not in seen_ids:
+                    seen_ids.add(msg_id)
+                    messages.append({"id": msg_id})
+        return messages
+
+    except Exception as e:
+        if "404" in str(e):
+            print("[!] History ID too old — falling back to unread scan.")
+            return None
+        raise
+
+
 def get_email_body(payload, max_chars: int = 1000) -> str:
     """Extracts and returns plain text from an email payload."""
     body = ""
