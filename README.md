@@ -7,25 +7,33 @@ An autonomous email classifier that runs on Google Cloud and keeps your inbox cl
 ```
 New email arrives in Gmail
   → Gmail Watch fires a notification to Google Cloud Pub/Sub
-  → Pub/Sub triggers the Cloud Function
-  → Function classifies the email using Gemini 2.0 Flash
-  → Gmail label applied, noise archived
+  → Pub/Sub triggers the Cloud Function (max 1 instance — no duplicate runs)
+  → Function checks Gmail History API for emails new since last run
+  → Deterministic pre-filters run first (no API cost)
+  → Remaining emails classified by Gemini 2.5 Flash Lite
+  → Gmail label applied, email archived out of Inbox
+  → historyId cursor saved to Firestore for next invocation
   → Function exits (no idle cost)
 ```
 
+## Inbox Philosophy
+
+**Your inbox only contains emails the agent could not confidently categorise** — your manual review queue. Every email that gets a label is archived out of the inbox automatically. To read your newsletters, check the `[Newsletter]` label. To see job progress, check `[Job] Forward`. You never need to touch the inbox for routine email.
+
 ## Classification Logic
 
-| Label | Meaning | Action |
+| Label | Meaning | Inbox? |
 |---|---|---|
-| `[Job] Applied` | Auto-confirmations ("We received your application") | Archived |
-| `[Job] Forward` | Real progress (interview invites, assessments, offers) | Kept in Inbox |
-| `[Job] Rejected` | Rejection notices | Archived |
-| `[Newsletter]` | Developer newsletters, AI/tech digests (e.g. TLDR) | Kept in Inbox |
-| `[Receipt]` | Purchase confirmations, app store receipts | Archived |
-| `[Junk]` | Promotional email, job board alerts, social notifications | Archived |
-| *(none)* | Ambiguous mail, known contacts | Kept in Inbox |
+| `[Job] Scout` | Alerts sent by the [Job Scout](https://github.com/davidgskkim/job-scout) pipeline | ❌ Archived |
+| `[Job] Applied` | Auto-confirmations ("We received your application") | ❌ Archived |
+| `[Job] Forward` | Real progress — interview invites, assessments, offers | ❌ Archived |
+| `[Job] Rejected` | Rejection notices | ❌ Archived |
+| `[Newsletter]` | Developer newsletters, AI/tech digests (e.g. TLDR) | ❌ Archived |
+| `[Receipt]` | Purchase confirmations, app store receipts | ❌ Archived |
+| `[Junk]` | Promotional email, job board alerts, social notifications | ❌ Archived |
+| *(none — KEEP)* | Ambiguous or personal mail the agent is unsure about | ✅ Inbox |
 
-When in doubt, the classifier keeps email in your Inbox. It only archives mail it is confident is low-value.
+When in doubt, the classifier keeps email in your Inbox. It never archives something it isn't confident about.
 
 ## Project Structure
 
