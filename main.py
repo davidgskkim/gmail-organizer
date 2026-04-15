@@ -31,6 +31,7 @@ from gmail_client import (
 LABEL_JOB_APPLIED  = "[Job] Applied"
 LABEL_JOB_FORWARD  = "[Job] Forward"
 LABEL_JOB_REJECTED = "[Job] Rejected"
+LABEL_JOB_SCOUT    = "[Job] Scout"      # Job Scout pipeline alerts
 LABEL_NEWSLETTER   = "[Newsletter]"
 LABEL_RECEIPT      = "[Receipt]"
 LABEL_JUNK         = "[Junk]"
@@ -118,6 +119,7 @@ def classify_email_handler(request):
         job_applied_label_id  = get_or_create_label(service, LABEL_JOB_APPLIED)
         job_forward_label_id  = get_or_create_label(service, LABEL_JOB_FORWARD)
         job_rejected_label_id = get_or_create_label(service, LABEL_JOB_REJECTED)
+        job_scout_label_id    = get_or_create_label(service, LABEL_JOB_SCOUT)
         newsletter_label_id   = get_or_create_label(service, LABEL_NEWSLETTER)
         receipt_label_id      = get_or_create_label(service, LABEL_RECEIPT)
         junk_label_id         = get_or_create_label(service, LABEL_JUNK)
@@ -136,16 +138,21 @@ def classify_email_handler(request):
             category = classify_email(gemini_client, subject, sender, body)
             print(f"[{category}] {subject[:60]}")
 
-            if category == "JOB_APPLIED":
+            if category == "JOB_SCOUT":
+                apply_label(service, msg_id, job_scout_label_id)
+                archive_message(service, msg_id)
+            elif category == "JOB_APPLIED":
                 apply_label(service, msg_id, job_applied_label_id)
                 archive_message(service, msg_id)
             elif category == "JOB_FORWARD":
                 apply_label(service, msg_id, job_forward_label_id)
+                archive_message(service, msg_id)
             elif category == "JOB_REJECTED":
                 apply_label(service, msg_id, job_rejected_label_id)
                 archive_message(service, msg_id)
             elif category == "NEWSLETTER":
                 apply_label(service, msg_id, newsletter_label_id)
+                archive_message(service, msg_id)
             elif category == "RECEIPT":
                 apply_label(service, msg_id, receipt_label_id)
                 archive_message(service, msg_id)

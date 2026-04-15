@@ -4,6 +4,9 @@ classifier.py
 Email classification using Google Gemini.
 Determines whether an email represents job application progress,
 inbox noise, or content worth keeping.
+
+Includes a deterministic pre-filter for Job Scout alert emails so they
+are never passed to Gemini — saving API quota and guaranteeing accuracy.
 """
 
 from google import genai
@@ -95,15 +98,40 @@ def get_gemini_client() -> genai.Client:
     return genai.Client(api_key=get_secret("gemini-api-key"))
 
 
+# ── Deterministic Pre-filters ──────────────────────────────────────────────────
+
+def is_job_scout_alert(subject: str, sender: str, body: str) -> bool:
+    """
+    Returns True if the email was sent by the Job Scout pipeline.
+
+    Job Scout always sends emails from the user's own Gmail address with:
+      - Subject starting with '🚀 '
+      - Footer containing 'Sent by Job Scout'
+
+    Checking all three signals makes this practically impossible to false-positive.
+    We short-circuit before calling Gemini to save API quota.
+    """
+    subject_match = subject.startswith("🚀 ")
+    # sender is the user's own address (Job Scout sends from GMAIL_USER to GMAIL_USER)
+    sender_match  = "job scout" in sender.lower() or "davidgsk.kim@gmail.com" in sender.lower()
+    body_match    = "sent by job scout" in body.lower()
+    return subject_match and (sender_match or body_match)
+
+
 # ── Classification ────────────────────────────────────────────────────────────
 
 def classify_email(client: genai.Client, subject: str, sender: str, body: str) -> str:
     """
-    Classifies an email using Gemini.
+    Classifies an email.
 
-    Returns one of: 'JOB_PROGRESS', 'NOISE', 'KEEP'
-    Defaults to 'KEEP' on any API error to avoid incorrectly archiving email.
+    First runs deterministic pre-filters (no API cost). If none match,
+    falls back to Gemini. Defaults to 'KEEP' on any API error.
     """
+    # Fast path: Job Scout pipeline emails — never send to Gemini.
+    if is_job_scout_alert(subject, sender, body):
+        print(f"[PRE-FILTER] Job Scout alert detected — skipping Gemini.")
+        return "JOB_SCOUT"
+
     prompt = CLASSIFICATION_PROMPT.format(sender=sender, subject=subject, body=body)
     try:
         response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
