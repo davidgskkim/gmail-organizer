@@ -63,19 +63,43 @@ def _set_last_history_id(history_id: str) -> None:
 
 # ── Cloud Function Entry Point ─────────────────────────────────────────────────
 
+PUBSUB_TOPIC = "projects/gmail-sort-agent/topics/gmail-notifications"
+
+
+def _renew_gmail_watch(service) -> None:
+    """Re-registers the Gmail push notification watch. Called by Cloud Scheduler every 6 days."""
+    result = service.users().watch(
+        userId="me",
+        body={"topicName": PUBSUB_TOPIC, "labelIds": ["INBOX"]},
+    ).execute()
+    print(f"[*] Gmail Watch renewed. historyId={result.get('historyId')} expiration={result.get('expiration')}")
+
+
 @functions_framework.http
 def classify_email_handler(request):
     """
-    HTTP handler triggered by a Pub/Sub push subscription.
+    HTTP handler triggered either by:
+      - A Pub/Sub push notification (new Gmail message)
+      - Cloud Scheduler with body {"renew": true} to renew the Gmail Watch
 
-    Gmail publishes a notification to Pub/Sub when new mail arrives.
-    Pub/Sub forwards it here as an HTTP POST. Returning HTTP 200
-    acknowledges the message; HTTP 500 signals Pub/Sub to retry.
+    Returning HTTP 200 acknowledges the message; HTTP 500 signals Pub/Sub to retry.
     """
     try:
-        # Decode the Pub/Sub envelope.
         envelope = request.get_json(silent=True)
-        if not envelope or "message" not in envelope:
+        if not envelope:
+            print("[!] Empty request body.")
+            return "Bad Request", 400
+
+        # ── Cloud Scheduler: Watch Renewal ─────────────────────────────────────
+        # Cloud Scheduler hits this endpoint every 6 days with {"renew": true}.
+        # Gmail Watch subscriptions expire after 7 days — this keeps them alive.
+        if envelope.get("renew"):
+            print("[*] Watch renewal triggered by Cloud Scheduler.")
+            _renew_gmail_watch(get_gmail_service())
+            return "OK", 200
+
+        # ── Pub/Sub: New Email Notification ────────────────────────────────────
+        if "message" not in envelope:
             print("[!] Invalid Pub/Sub message received.")
             return "Bad Request", 400
 
@@ -95,6 +119,12 @@ def classify_email_handler(request):
         if not last_history_id:
             print("[*] First run — storing historyId and exiting (nothing to classify yet).")
             _set_last_history_id(new_history_id)
+            return "OK", 200
+
+        # Prevent infinite retry loops: if Pub/Sub retries an old notification
+        # that we've already synced past, skip it entirely.
+        if last_history_id and new_history_id and int(new_history_id) <= int(last_history_id):
+            print(f"[*] Notification {new_history_id} is older/equal to cursor {last_history_id}. Skipping.")
             return "OK", 200
 
         # ── Fetch only new messages via History API ────────────────────────────
@@ -135,7 +165,7 @@ def classify_email_handler(request):
             sender  = headers.get("From", "(Unknown Sender)")
             body    = get_email_body(msg["payload"])
 
-            category = classify_email(gemini_client, subject, sender, body)
+            category, api_called = classify_email(gemini_client, subject, sender, body)
             print(f"[{category}] {subject[:60]}")
 
             if category == "JOB_SCOUT":
@@ -162,7 +192,9 @@ def classify_email_handler(request):
 
             # KEEP: no action — message remains in Inbox as-is.
 
-            time.sleep(2)  # Respect Gemini API rate limits.
+            # Only sleep if we actually hit Gemini (respect rate limits)
+            if api_called:
+                time.sleep(3)
 
         return "OK", 200
 

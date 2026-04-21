@@ -120,24 +120,25 @@ def is_job_scout_alert(subject: str, sender: str, body: str) -> bool:
 
 # ── Classification ────────────────────────────────────────────────────────────
 
-def classify_email(client: genai.Client, subject: str, sender: str, body: str) -> str:
+def classify_email(client: genai.Client, subject: str, sender: str, body: str) -> tuple[str, bool]:
     """
     Classifies an email.
 
     First runs deterministic pre-filters (no API cost). If none match,
-    falls back to Gemini. Defaults to 'KEEP' on any API error.
+    falls back to Gemini. Returns a tuple: (category, api_called).
     """
     # Fast path: Job Scout pipeline emails — never send to Gemini.
     if is_job_scout_alert(subject, sender, body):
-        print(f"[PRE-FILTER] Job Scout alert detected — skipping Gemini.")
-        return "JOB_SCOUT"
+        print(f"[*] Pre-filter matched: JOB_SCOUT alert detected.")
+        return "JOB_SCOUT", False
 
     prompt = CLASSIFICATION_PROMPT.format(sender=sender, subject=subject, body=body)
     try:
         response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
         result = response.text.strip().upper()
         valid_categories = ("JOB_APPLIED", "JOB_FORWARD", "JOB_REJECTED", "NEWSLETTER", "RECEIPT", "JUNK", "KEEP")
-        return result if result in valid_categories else "KEEP"
+        final_category = result if result in valid_categories else "KEEP"
+        return final_category, True
     except Exception as e:
         print(f"[!] Gemini classification error: {e}")
-        return "KEEP"  # Fail safe: never archive on API error.
+        return "KEEP", False  # No successful API call.

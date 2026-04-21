@@ -17,7 +17,10 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-SCOPES       = ["https://mail.google.com/"]
+SCOPES       = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 TOKEN_FILE   = "token.json"
 CREDS_FILE   = "credentials.json"
 PUBSUB_TOPIC = "projects/gmail-sort-agent/topics/gmail-notifications"
