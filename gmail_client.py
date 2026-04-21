@@ -15,7 +15,10 @@ from googleapiclient.discovery import build
 
 from secret_manager import get_secret
 
-SCOPES = ["https://mail.google.com/"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 
 # ── Authentication ─────────────────────────────────────────────────────────────
