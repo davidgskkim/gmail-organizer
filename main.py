@@ -87,7 +87,13 @@ def classify_email_handler(request):
     try:
         envelope = request.get_json(silent=True)
         if not envelope:
-            print("[!] Empty request body.")
+            try:
+                envelope = json.loads(request.get_data(as_text=True))
+            except Exception:
+                pass
+                
+        if not envelope:
+            print(f"[!] Empty request body. raw data: {request.get_data(as_text=True)}")
             return "Bad Request", 400
 
         # ── Cloud Scheduler: Watch Renewal ─────────────────────────────────────
